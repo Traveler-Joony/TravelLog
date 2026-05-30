@@ -1,11 +1,11 @@
-package jay.travellog.data
+package com.jay.travellog.data
 
 import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
-import jay.travellog.model.TravelRecord
+import com.jay.travellog.model.TravelRecord
 
 class DBHelper(context: Context) :
     SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {

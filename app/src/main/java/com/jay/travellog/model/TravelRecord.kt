@@ -1,4 +1,4 @@
-package jay.travellog.model
+package com.jay.travellog.model
 
 /** 여행 기록 한 건. no = 0 이면 아직 저장 전(신규)이라는 뜻. */
 data class TravelRecord(
