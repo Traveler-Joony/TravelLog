@@ -1,5 +1,6 @@
 package com.jay.travellog.ui
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -9,6 +10,7 @@ import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.jay.travellog.R
 import com.jay.travellog.adapter.TravelAdapter
 import com.jay.travellog.data.DBHelper
@@ -44,11 +46,16 @@ class ListFragment : Fragment() {
 
         recyclerView.layoutManager = LinearLayoutManager(requireContext())
         recyclerView.adapter = adapter
+
+        // FAB(+) → 추가 모드로 AddEditActivity 실행 (no를 안 넘기면 신규)
+        view.findViewById<FloatingActionButton>(R.id.fabAdd).setOnClickListener {
+            startActivity(Intent(requireContext(), AddEditActivity::class.java))
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        // 추가/수정 화면(Day 5~)에서 돌아오면 목록이 자동 갱신되도록 onResume에서 로드
+        // 추가/수정 화면에서 돌아오면 목록이 자동 갱신되도록 onResume에서 로드
         loadData()
     }
 
