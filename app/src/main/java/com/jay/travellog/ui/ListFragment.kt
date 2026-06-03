@@ -6,7 +6,6 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
-import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -36,12 +35,10 @@ class ListFragment : Fragment() {
         emptyView = view.findViewById(R.id.txtEmpty)
 
         adapter = TravelAdapter(emptyList()) { record ->
-            // Day 6에서 DetailActivity 실행으로 교체합니다.
-            Toast.makeText(
-                requireContext(),
-                "${record.place} 클릭됨 · Day 6에서 상세 화면 연결 예정",
-                Toast.LENGTH_SHORT
-            ).show()
+            // 항목 클릭 → 상세 화면으로 no 전달
+            val intent = Intent(requireContext(), DetailActivity::class.java)
+            intent.putExtra(DetailActivity.EXTRA_NO, record.no)
+            startActivity(intent)
         }
 
         recyclerView.layoutManager = LinearLayoutManager(requireContext())

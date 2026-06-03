@@ -23,6 +23,9 @@
         <activity
             android:name=".ui.AddEditActivity"
             android:exported="false" />
+        <activity
+            android:name=".ui.DetailActivity"
+            android:exported="false" />
     </application>
 
 </manifest>
