@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- filesDir/images/ 아래 파일을 FileProvider로 공유 (카메라 출력용) -->
+    <files-path
+        name="images"
+        path="images/" />
+</paths>
