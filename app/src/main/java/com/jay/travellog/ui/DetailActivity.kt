@@ -1,21 +1,25 @@
 package com.jay.travellog.ui
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.widget.Button
 import android.widget.ImageView
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import com.jay.travellog.R
 import com.jay.travellog.data.DBHelper
+import com.jay.travellog.util.ImageUtils
+import kotlinx.coroutines.launch
 
 class DetailActivity : AppCompatActivity() {
 
     private lateinit var dbHelper: DBHelper
 
     private lateinit var imgPhoto: ImageView
+    private lateinit var progressPhoto: ProgressBar
     private lateinit var tvPlace: TextView
     private lateinit var tvDate: TextView
     private lateinit var tvMemo: TextView
@@ -30,6 +34,7 @@ class DetailActivity : AppCompatActivity() {
         dbHelper = DBHelper(this)
 
         imgPhoto = findViewById(R.id.imgPhoto)
+        progressPhoto = findViewById(R.id.progressPhoto)
         tvPlace = findViewById(R.id.tvPlace)
         tvDate = findViewById(R.id.tvDate)
         tvMemo = findViewById(R.id.tvMemo)
@@ -43,7 +48,6 @@ class DetailActivity : AppCompatActivity() {
         }
 
         btnEdit.setOnClickListener {
-            // 수정 모드로 AddEditActivity 실행 (no 전달 → 기존 값 채워짐)
             val editIntent = Intent(this, AddEditActivity::class.java)
             editIntent.putExtra(AddEditActivity.EXTRA_NO, recordNo)
             startActivity(editIntent)
@@ -52,14 +56,12 @@ class DetailActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // 수정 화면에서 돌아왔을 때 최신 내용으로 다시 표시
         showRecord()
     }
 
     private fun showRecord() {
         val record = dbHelper.getRecordById(recordNo)
         if (record == null) {
-            // 조회 실패(또는 추후 삭제됨) → 화면 종료
             Toast.makeText(this, "기록을 찾을 수 없습니다.", Toast.LENGTH_SHORT).show()
             finish()
             return
@@ -69,15 +71,28 @@ class DetailActivity : AppCompatActivity() {
         tvDate.text = record.visitDate
         tvMemo.text = if (record.memo.isBlank()) "(메모 없음)" else record.memo
 
-        if (!record.photoUri.isNullOrBlank()) {
-            try {
+        loadPhoto(record.photoUri)
+    }
+
+    /** 사진을 코루틴으로 비동기 디코딩해서 표시 (로딩 중 ProgressBar) */
+    private fun loadPhoto(uriString: String?) {
+        if (uriString.isNullOrBlank()) {
+            progressPhoto.visibility = ProgressBar.GONE
+            showPhotoPlaceholder()
+            return
+        }
+        progressPhoto.visibility = ProgressBar.VISIBLE
+        imgPhoto.setImageDrawable(null)
+
+        lifecycleScope.launch {
+            val bmp = ImageUtils.decodeSampledBitmap(this@DetailActivity, uriString, 1280, 1280)
+            progressPhoto.visibility = ProgressBar.GONE
+            if (bmp != null) {
                 imgPhoto.scaleType = ImageView.ScaleType.CENTER_CROP
-                imgPhoto.setImageURI(Uri.parse(record.photoUri))
-            } catch (_: Exception) {
+                imgPhoto.setImageBitmap(bmp)
+            } else {
                 showPhotoPlaceholder()
             }
-        } else {
-            showPhotoPlaceholder()
         }
     }
 
@@ -87,7 +102,6 @@ class DetailActivity : AppCompatActivity() {
     }
 
     companion object {
-        /** 표시할 기록 번호(no)를 전달하는 Intent extra 키. */
         const val EXTRA_NO = "extra_no"
     }
 }

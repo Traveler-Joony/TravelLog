@@ -1,23 +1,33 @@
 package com.jay.travellog.adapter
 
-import android.net.Uri
 import android.view.ContextMenu
 import android.view.LayoutInflater
 import android.view.MenuInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
+import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.jay.travellog.R
 import com.jay.travellog.model.TravelRecord
+import com.jay.travellog.util.ImageUtils
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 class TravelAdapter(
     private var items: List<TravelRecord>,
     private val onItemClick: (TravelRecord) -> Unit
 ) : RecyclerView.Adapter<TravelAdapter.VH>() {
 
-    // 컨텍스트 메뉴(롱클릭) 대상이 된 항목의 위치
+    // 이미지 로딩용 스코프 (메인 스레드에서 결과 반영, RecyclerView 분리 시 취소)
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
+    // 컨텍스트 메뉴(롱클릭) 대상 위치
     var selectedPosition = -1
         private set
 
@@ -25,11 +35,12 @@ class TravelAdapter(
         View.OnCreateContextMenuListener {
 
         val thumbnail: ImageView = itemView.findViewById(R.id.imgThumbnail)
+        val progress: ProgressBar = itemView.findViewById(R.id.progressThumb)
         val place: TextView = itemView.findViewById(R.id.txtPlace)
         val date: TextView = itemView.findViewById(R.id.txtDate)
+        var loadJob: Job? = null
 
         init {
-            // 이 뷰를 롱클릭하면 컨텍스트 메뉴가 뜨도록 등록
             itemView.setOnCreateContextMenuListener(this)
         }
 
@@ -38,7 +49,6 @@ class TravelAdapter(
             v: View,
             menuInfo: ContextMenu.ContextMenuInfo?
         ) {
-            // 어떤 항목을 길게 눌렀는지 위치를 기록 (Fragment에서 꺼내 씀)
             selectedPosition = bindingAdapterPosition
             MenuInflater(v.context).inflate(R.menu.list_context_menu, menu)
         }
@@ -54,30 +64,54 @@ class TravelAdapter(
         val record = items[position]
         holder.place.text = record.place
         holder.date.text = record.visitDate
+        holder.itemView.setOnClickListener { onItemClick(record) }
 
-        // 사진: 지금은 단순 로딩. Day 11에서 코루틴 비동기 로딩으로 교체합니다.
+        // 이전 로딩 취소 (재활용된 뷰에 엉뚱한 이미지가 뜨는 것 방지)
+        holder.loadJob?.cancel()
+
         if (record.photoUri.isNullOrBlank()) {
+            holder.progress.visibility = View.GONE
             holder.thumbnail.scaleType = ImageView.ScaleType.CENTER_INSIDE
             holder.thumbnail.setImageResource(R.drawable.ic_image_placeholder)
-        } else {
-            try {
+            return
+        }
+
+        // 로딩 시작: ProgressBar 표시, 이미지 비우기
+        holder.progress.visibility = View.VISIBLE
+        holder.thumbnail.setImageDrawable(null)
+
+        holder.loadJob = scope.launch {
+            val bmp = ImageUtils.decodeSampledBitmap(
+                holder.itemView.context, record.photoUri!!, 200, 200
+            )
+            // 여기는 다시 메인 스레드. 위에서 cancel됐으면 이 블록은 실행되지 않음.
+            holder.progress.visibility = View.GONE
+            if (bmp != null) {
                 holder.thumbnail.scaleType = ImageView.ScaleType.CENTER_CROP
-                holder.thumbnail.setImageURI(Uri.parse(record.photoUri))
-            } catch (e: Exception) {
+                holder.thumbnail.setImageBitmap(bmp)
+            } else {
                 holder.thumbnail.scaleType = ImageView.ScaleType.CENTER_INSIDE
                 holder.thumbnail.setImageResource(R.drawable.ic_image_placeholder)
             }
         }
+    }
 
-        holder.itemView.setOnClickListener { onItemClick(record) }
+    override fun onViewRecycled(holder: VH) {
+        super.onViewRecycled(holder)
+        holder.loadJob?.cancel()
+        holder.thumbnail.setImageDrawable(null)
+        holder.progress.visibility = View.GONE
+    }
+
+    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
+        super.onDetachedFromRecyclerView(recyclerView)
+        scope.cancel()   // 화면을 떠나면 진행 중인 로딩 모두 취소
     }
 
     override fun getItemCount(): Int = items.size
 
-    /** 위치로 항목 조회 (컨텍스트 메뉴 처리용). 범위를 벗어나면 null. */
     fun getItemAt(position: Int): TravelRecord? = items.getOrNull(position)
 
-    /** DB에서 새로 읽은 목록으로 갱신. (DiffUtil 적용은 추후 최적화 과제) */
     fun updateData(newItems: List<TravelRecord>) {
         items = newItems
         notifyDataSetChanged()

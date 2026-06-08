@@ -2,10 +2,12 @@ package com.jay.travellog.ui
 
 import android.Manifest
 import android.app.DatePickerDialog
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageView
@@ -19,6 +21,7 @@ import androidx.core.content.FileProvider
 import com.jay.travellog.R
 import com.jay.travellog.data.DBHelper
 import com.jay.travellog.model.TravelRecord
+import com.jay.travellog.util.ImageUtils
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -35,48 +38,83 @@ class AddEditActivity : AppCompatActivity() {
     private lateinit var etMemo: EditText
     private lateinit var btnPickPhoto: Button
     private lateinit var imgPreview: ImageView
+    private lateinit var btnPickLocation: Button
+    private lateinit var tvLocation: TextView
     private lateinit var btnSave: Button
 
-    private var editingNo: Int = 0          // 0이면 신규(insert), >0이면 수정(update)
-    private var photoUri: String? = null    // 내부 저장소 파일 URI(file://...) 문자열
+    private var editingNo: Int = 0
+    private var photoUri: String? = null
+    private var latitude: Double? = null
+    private var longitude: Double? = null
 
-    // 카메라가 사진을 기록할 내부 파일
     private var cameraImageFile: File? = null
 
-    // ───────── ActivityResultLauncher (생성 시점에 등록) ─────────
+    // ───────── ActivityResultLauncher ─────────
 
-    /** 갤러리에서 이미지 선택 → 내부 저장소로 복사 */
+    // 갤러리: ACTION_PICK → MediaStore URI를 돌려줌(setRequireOriginal로 원본 GPS 읽기 가능)
     private val galleryLauncher =
-        registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-            if (uri != null) {
-                val saved = copyToInternal(uri)
-                if (saved != null) setPhoto(Uri.fromFile(saved).toString())
-                else toast("사진을 불러오지 못했습니다")
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK) {
+                val uri = result.data?.data
+                if (uri != null) {
+                    // 1) 원본 URI에서 EXIF 좌표 시도
+                    ImageUtils.extractLatLng(this, uri)?.let { (lat, lng) ->
+                        latitude = lat; longitude = lng
+                        updateLocationStatus()
+                        toast("사진에서 위치를 가져왔어요")
+                    }
+                    // 2) 표시·영속성을 위해 내부 저장소로 복사
+                    val saved = copyToInternal(uri)
+                    if (saved != null) setPhoto(Uri.fromFile(saved).toString())
+                    else toast("사진을 불러오지 못했습니다")
+                }
             }
         }
 
-    /** 카메라 촬영 → 미리 만든 파일에 저장됨 */
     private val cameraLauncher =
         registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
             if (success && cameraImageFile != null) {
-                setPhoto(Uri.fromFile(cameraImageFile).toString())
+                val fileUri = Uri.fromFile(cameraImageFile)
+                ImageUtils.extractLatLng(this, fileUri)?.let { (lat, lng) ->
+                    latitude = lat; longitude = lng
+                    updateLocationStatus()
+                    toast("사진에서 위치를 가져왔어요")
+                }
+                setPhoto(fileUri.toString())
             } else {
-                cameraImageFile?.delete()   // 취소 시 빈 파일 정리
+                cameraImageFile?.delete()
             }
         }
 
-    /** 갤러리 권한 요청 결과 */
+    // 갤러리 권한: 읽기 권한 + ACCESS_MEDIA_LOCATION 함께 요청
     private val galleryPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (granted) galleryLauncher.launch("image/*")
-            else toast("갤러리 접근 권한이 필요합니다")
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            val readPerm = readImagePermission()
+            if (result[readPerm] == true) {
+                launchGallery()
+            } else {
+                toast("갤러리 접근 권한이 필요합니다")
+            }
+            // ACCESS_MEDIA_LOCATION은 best-effort: 거부돼도 갤러리는 열되 GPS만 못 읽음(→ 수동 지정)
         }
 
-    /** 카메라 권한 요청 결과 */
     private val cameraPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) launchCamera()
             else toast("카메라 권한이 필요합니다")
+        }
+
+    private val mapPickerLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK) {
+                val data = result.data ?: return@registerForActivityResult
+                val lat = data.getDoubleExtra(MapPickerActivity.EXTRA_LAT, Double.NaN)
+                val lng = data.getDoubleExtra(MapPickerActivity.EXTRA_LNG, Double.NaN)
+                if (!lat.isNaN() && !lng.isNaN()) {
+                    latitude = lat; longitude = lng
+                    updateLocationStatus()
+                }
+            }
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -90,9 +128,11 @@ class AddEditActivity : AppCompatActivity() {
         val isEdit = editingNo > 0
         tvTitle.text = if (isEdit) "기록 수정" else "기록 추가"
         if (isEdit) loadRecord(editingNo)
+        updateLocationStatus()
 
         etDate.setOnClickListener { showDatePicker() }
         btnPickPhoto.setOnClickListener { showPhotoSourceDialog() }
+        btnPickLocation.setOnClickListener { openMapPicker() }
         btnSave.setOnClickListener { save() }
     }
 
@@ -103,7 +143,25 @@ class AddEditActivity : AppCompatActivity() {
         etMemo = findViewById(R.id.etMemo)
         btnPickPhoto = findViewById(R.id.btnPickPhoto)
         imgPreview = findViewById(R.id.imgPreview)
+        btnPickLocation = findViewById(R.id.btnPickLocation)
+        tvLocation = findViewById(R.id.tvLocation)
         btnSave = findViewById(R.id.btnSave)
+    }
+
+    // ───────── 위치 ─────────
+
+    private fun openMapPicker() {
+        val intent = Intent(this, MapPickerActivity::class.java)
+        latitude?.let { intent.putExtra(MapPickerActivity.EXTRA_LAT, it) }
+        longitude?.let { intent.putExtra(MapPickerActivity.EXTRA_LNG, it) }
+        mapPickerLauncher.launch(intent)
+    }
+
+    private fun updateLocationStatus() {
+        tvLocation.text = if (latitude != null && longitude != null)
+            "위치: %.5f, %.5f".format(latitude, longitude)
+        else
+            "위치 없음 (사진에 GPS가 없으면 지도에서 지정)"
     }
 
     // ───────── 사진 선택 ─────────
@@ -130,24 +188,33 @@ class AddEditActivity : AppCompatActivity() {
         }
     }
 
-    private fun checkGalleryPermissionAndLaunch() {
-        // Android 13(API 33)+ 는 READ_MEDIA_IMAGES, 그 이하는 READ_EXTERNAL_STORAGE
-        val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+    /** API 33+ 는 READ_MEDIA_IMAGES, 그 이하는 READ_EXTERNAL_STORAGE */
+    private fun readImagePermission(): String =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             Manifest.permission.READ_MEDIA_IMAGES
         else
             Manifest.permission.READ_EXTERNAL_STORAGE
-        if (ContextCompat.checkSelfPermission(this, perm) == PackageManager.PERMISSION_GRANTED) {
-            galleryLauncher.launch("image/*")
-        } else {
-            galleryPermissionLauncher.launch(perm)
+
+    private fun checkGalleryPermissionAndLaunch() {
+        val perms = mutableListOf(readImagePermission())
+        // Android 10(Q)+ 에서 사진 원본 GPS를 읽으려면 ACCESS_MEDIA_LOCATION 필요
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            perms += Manifest.permission.ACCESS_MEDIA_LOCATION
         }
+        // 이미 모두 허용돼 있으면 시스템이 즉시 콜백(다이얼로그 없음)
+        galleryPermissionLauncher.launch(perms.toTypedArray())
+    }
+
+    /** ACTION_PICK → content://media/... URI 반환 (setRequireOriginal 사용 가능) */
+    private fun launchGallery() {
+        val intent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
+        galleryLauncher.launch(intent)
     }
 
     private fun launchCamera() {
         try {
             val file = createImageFile()
             cameraImageFile = file
-            // FileProvider로 content:// URI를 만들어 카메라 앱에 전달 (file:// 직접 전달은 금지됨)
             val authority = "$packageName.fileprovider"
             val uri = FileProvider.getUriForFile(this, authority, file)
             cameraLauncher.launch(uri)
@@ -156,14 +223,12 @@ class AddEditActivity : AppCompatActivity() {
         }
     }
 
-    /** 내부 저장소(filesDir/images)에 새 이미지 파일 경로 생성 */
     private fun createImageFile(): File {
         val dir = File(filesDir, "images").apply { if (!exists()) mkdirs() }
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         return File(dir, "IMG_$stamp.jpg")
     }
 
-    /** 갤러리 URI의 내용을 내부 저장소로 복사 → 영속성 보장 (URI 권한 만료와 무관) */
     private fun copyToInternal(source: Uri): File? {
         return try {
             val dest = createImageFile()
@@ -201,6 +266,8 @@ class AddEditActivity : AppCompatActivity() {
         etDate.setText(record.visitDate)
         etMemo.setText(record.memo)
         photoUri = record.photoUri
+        latitude = record.latitude
+        longitude = record.longitude
         if (!record.photoUri.isNullOrBlank()) {
             try {
                 imgPreview.scaleType = ImageView.ScaleType.CENTER_CROP
@@ -253,8 +320,9 @@ class AddEditActivity : AppCompatActivity() {
             place = place,
             visitDate = date,
             memo = memo,
-            photoUri = photoUri
-            // latitude/longitude는 Day 10에서 사진 EXIF로부터 채웁니다.
+            photoUri = photoUri,
+            latitude = latitude,
+            longitude = longitude
         )
 
         val success = if (editingNo > 0) {
@@ -265,7 +333,7 @@ class AddEditActivity : AppCompatActivity() {
 
         if (success) {
             toast(if (editingNo > 0) "수정되었습니다" else "저장되었습니다")
-            finish()   // 목록은 ListFragment.onResume()에서 자동 갱신됨
+            finish()
         } else {
             toast("저장에 실패했습니다")
         }

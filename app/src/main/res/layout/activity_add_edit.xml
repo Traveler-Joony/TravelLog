@@ -22,7 +22,6 @@
             android:textSize="22sp"
             android:textStyle="bold" />
 
-        <!-- 여행지명 -->
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -36,7 +35,6 @@
                 android:maxLines="1" />
         </com.google.android.material.textfield.TextInputLayout>
 
-        <!-- 방문 날짜 (탭하면 DatePicker) -->
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -52,7 +50,6 @@
                 android:focusable="false" />
         </com.google.android.material.textfield.TextInputLayout>
 
-        <!-- 메모 -->
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -68,7 +65,6 @@
                 android:minLines="3" />
         </com.google.android.material.textfield.TextInputLayout>
 
-        <!-- 사진 (Day 7에서 카메라/갤러리 연결) -->
         <Button
             android:id="@+id/btnPickPhoto"
             android:layout_width="match_parent"
@@ -86,7 +82,22 @@
             android:scaleType="centerInside"
             android:src="@drawable/ic_image_placeholder" />
 
-        <!-- 저장 -->
+        <Button
+            android:id="@+id/btnPickLocation"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="📍  지도에서 위치 지정" />
+
+        <TextView
+            android:id="@+id/tvLocation"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="위치 없음"
+            android:textColor="#757575"
+            android:textSize="13sp" />
+
         <Button
             android:id="@+id/btnSave"
             android:layout_width="match_parent"

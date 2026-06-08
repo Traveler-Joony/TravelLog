@@ -18,14 +18,26 @@
         android:orientation="horizontal"
         android:padding="10dp">
 
-        <ImageView
-            android:id="@+id/imgThumbnail"
+        <FrameLayout
             android:layout_width="72dp"
-            android:layout_height="72dp"
-            android:background="@color/bg_light"
-            android:contentDescription="여행 사진"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_image_placeholder" />
+            android:layout_height="72dp">
+
+            <ImageView
+                android:id="@+id/imgThumbnail"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@color/bg_light"
+                android:contentDescription="여행 사진"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_image_placeholder" />
+
+            <ProgressBar
+                android:id="@+id/progressThumb"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_gravity="center"
+                android:visibility="gone" />
+        </FrameLayout>
 
         <LinearLayout
             android:layout_width="0dp"
