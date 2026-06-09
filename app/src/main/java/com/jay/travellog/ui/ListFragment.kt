@@ -8,6 +8,7 @@ import android.view.MenuInflater
 import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -22,6 +23,7 @@ import com.jay.travellog.R
 import com.jay.travellog.adapter.TravelAdapter
 import com.jay.travellog.data.DBHelper
 import com.jay.travellog.model.TravelRecord
+import com.jay.travellog.util.ImageUtils
 
 class ListFragment : Fragment() {
 
@@ -30,7 +32,7 @@ class ListFragment : Fragment() {
     private lateinit var recyclerView: RecyclerView
     private lateinit var emptyView: TextView
 
-    private var sortByDateDesc = true   // true: 날짜순(최신), false: 이름순
+    private var sortByDateDesc = true
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -61,7 +63,6 @@ class ListFragment : Fragment() {
         setupOptionsMenu()
     }
 
-    // ───────── 옵션 메뉴 (MenuProvider, 최신 API) ─────────
     private fun setupOptionsMenu() {
         val menuHost = requireActivity() as MenuHost
         menuHost.addMenuProvider(object : MenuProvider {
@@ -76,11 +77,9 @@ class ListFragment : Fragment() {
                     R.id.action_about -> { showAbout(); true }
                     else -> false
                 }
-            // viewLifecycleOwner + RESUMED → 목록 화면일 때만 메뉴가 보임
         }, viewLifecycleOwner, Lifecycle.State.RESUMED)
     }
 
-    // ───────── 컨텍스트 메뉴 (롱클릭) 선택 처리 ─────────
     override fun onContextItemSelected(item: MenuItem): Boolean {
         val record = adapter.getItemAt(adapter.selectedPosition)
             ?: return super.onContextItemSelected(item)
@@ -96,29 +95,32 @@ class ListFragment : Fragment() {
         }
     }
 
-    // ───────── 정렬 ─────────
     private fun toggleSort() {
         sortByDateDesc = !sortByDateDesc
         toast(if (sortByDateDesc) "날짜순으로 정렬" else "이름순으로 정렬")
         loadData()
     }
 
-    // ───────── 삭제 (AlertDialog 확인) ─────────
     private fun confirmDeleteOne(record: TravelRecord) {
         AlertDialog.Builder(requireContext())
             .setTitle("삭제")
             .setMessage("'${record.place}' 기록을 삭제할까요?")
             .setPositiveButton("삭제") { _, _ ->
-                dbHelper.deleteRecord(record.no)
-                loadData()
-                toast("삭제되었습니다")
+                if (dbHelper.deleteRecord(record.no) > 0) {
+                    ImageUtils.deleteInternalPhoto(requireContext(), record.photoUri)
+                    loadData()
+                    toast("삭제되었습니다")
+                } else {
+                    toast("삭제에 실패했습니다")
+                }
             }
             .setNegativeButton("취소", null)
             .show()
     }
 
     private fun confirmDeleteAll() {
-        if (dbHelper.getAllRecords().isEmpty()) {
+        val all = dbHelper.getAllRecords()
+        if (all.isEmpty()) {
             toast("삭제할 기록이 없습니다")
             return
         }
@@ -126,9 +128,13 @@ class ListFragment : Fragment() {
             .setTitle("전체 삭제")
             .setMessage("모든 여행 기록을 삭제할까요?\n되돌릴 수 없습니다.")
             .setPositiveButton("전체 삭제") { _, _ ->
-                dbHelper.deleteAll()
-                loadData()
-                toast("전체 삭제되었습니다")
+                if (dbHelper.deleteAll() > 0) {
+                    all.forEach { ImageUtils.deleteInternalPhoto(requireContext(), it.photoUri) }
+                    loadData()
+                    toast("전체 삭제되었습니다")
+                } else {
+                    toast("삭제에 실패했습니다")
+                }
             }
             .setNegativeButton("취소", null)
             .show()
@@ -139,6 +145,29 @@ class ListFragment : Fragment() {
             .setTitle("앱 정보")
             .setMessage("여행 기록 (Travel Log)\n버전 1.0\n\n모바일 프로그래밍 기말 프로젝트")
             .setPositiveButton("확인", null)
+            .setNegativeButton("관리자 모드") { _, _ -> showAdminLogin() }
+            .show()
+    }
+
+    /** 관리자 인증 다이얼로그. abc / 123 일치 시 관리자 화면으로 이동. */
+    private fun showAdminLogin() {
+        val view = layoutInflater.inflate(R.layout.dialog_admin_login, null)
+        val etId = view.findViewById<EditText>(R.id.etAdminId)
+        val etPw = view.findViewById<EditText>(R.id.etAdminPw)
+
+        AlertDialog.Builder(requireContext())
+            .setTitle("관리자 인증")
+            .setView(view)
+            .setPositiveButton("확인") { _, _ ->
+                val id = etId.text.toString().trim()
+                val pw = etPw.text.toString()
+                if (id == ADMIN_ID && pw == ADMIN_PW) {
+                    startActivity(Intent(requireContext(), AdminActivity::class.java))
+                } else {
+                    toast("인증 실패: 아이디 또는 비밀번호가 올바르지 않습니다")
+                }
+            }
+            .setNegativeButton("취소", null)
             .show()
     }
 
@@ -158,4 +187,10 @@ class ListFragment : Fragment() {
 
     private fun toast(msg: String) =
         Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
+
+    companion object {
+        // 개발/디버그용 소프트 게이트 (실제 보안 아님)
+        private const val ADMIN_ID = "abc"
+        private const val ADMIN_PW = "123"
+    }
 }

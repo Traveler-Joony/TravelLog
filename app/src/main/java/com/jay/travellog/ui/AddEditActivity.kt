@@ -21,6 +21,7 @@ import androidx.core.content.FileProvider
 import com.jay.travellog.R
 import com.jay.travellog.data.DBHelper
 import com.jay.travellog.model.TravelRecord
+import com.jay.travellog.util.GeoUtils
 import com.jay.travellog.util.ImageUtils
 import java.io.File
 import java.text.SimpleDateFormat
@@ -44,28 +45,31 @@ class AddEditActivity : AppCompatActivity() {
 
     private var editingNo: Int = 0
     private var photoUri: String? = null
+    private var originalPhotoUri: String? = null   // 수정 모드에서 DB에 저장돼 있던 사진
     private var latitude: Double? = null
     private var longitude: Double? = null
 
     private var cameraImageFile: File? = null
 
+    private var isSaving = false           // 저장 중복(연타) 방지
+    private var savedSuccessfully = false  // 저장 성공 후 정리 로직 제어
+
     // ───────── ActivityResultLauncher ─────────
 
-    // 갤러리: ACTION_PICK → MediaStore URI를 돌려줌(setRequireOriginal로 원본 GPS 읽기 가능)
     private val galleryLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) {
                 val uri = result.data?.data
                 if (uri != null) {
-                    // 1) 원본 URI에서 EXIF 좌표 시도
                     ImageUtils.extractLatLng(this, uri)?.let { (lat, lng) ->
-                        latitude = lat; longitude = lng
-                        updateLocationStatus()
-                        toast("사진에서 위치를 가져왔어요")
+                        if (GeoUtils.isValidLatLng(lat, lng)) {
+                            latitude = lat; longitude = lng
+                            updateLocationStatus()
+                            toast("사진에서 위치를 가져왔어요")
+                        }
                     }
-                    // 2) 표시·영속성을 위해 내부 저장소로 복사
                     val saved = copyToInternal(uri)
-                    if (saved != null) setPhoto(Uri.fromFile(saved).toString())
+                    if (saved != null) replacePhoto(Uri.fromFile(saved).toString())
                     else toast("사진을 불러오지 못했습니다")
                 }
             }
@@ -76,17 +80,18 @@ class AddEditActivity : AppCompatActivity() {
             if (success && cameraImageFile != null) {
                 val fileUri = Uri.fromFile(cameraImageFile)
                 ImageUtils.extractLatLng(this, fileUri)?.let { (lat, lng) ->
-                    latitude = lat; longitude = lng
-                    updateLocationStatus()
-                    toast("사진에서 위치를 가져왔어요")
+                    if (GeoUtils.isValidLatLng(lat, lng)) {
+                        latitude = lat; longitude = lng
+                        updateLocationStatus()
+                        toast("사진에서 위치를 가져왔어요")
+                    }
                 }
-                setPhoto(fileUri.toString())
+                replacePhoto(fileUri.toString())
             } else {
-                cameraImageFile?.delete()
+                cameraImageFile?.delete()   // 촬영 취소: 빈 파일 정리
             }
         }
 
-    // 갤러리 권한: 읽기 권한 + ACCESS_MEDIA_LOCATION 함께 요청
     private val galleryPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
             val readPerm = readImagePermission()
@@ -95,7 +100,6 @@ class AddEditActivity : AppCompatActivity() {
             } else {
                 toast("갤러리 접근 권한이 필요합니다")
             }
-            // ACCESS_MEDIA_LOCATION은 best-effort: 거부돼도 갤러리는 열되 GPS만 못 읽음(→ 수동 지정)
         }
 
     private val cameraPermissionLauncher =
@@ -110,7 +114,7 @@ class AddEditActivity : AppCompatActivity() {
                 val data = result.data ?: return@registerForActivityResult
                 val lat = data.getDoubleExtra(MapPickerActivity.EXTRA_LAT, Double.NaN)
                 val lng = data.getDoubleExtra(MapPickerActivity.EXTRA_LNG, Double.NaN)
-                if (!lat.isNaN() && !lng.isNaN()) {
+                if (GeoUtils.isValidLatLng(lat, lng)) {
                     latitude = lat; longitude = lng
                     updateLocationStatus()
                 }
@@ -127,13 +131,42 @@ class AddEditActivity : AppCompatActivity() {
         editingNo = intent.getIntExtra(EXTRA_NO, 0)
         val isEdit = editingNo > 0
         tvTitle.text = if (isEdit) "기록 수정" else "기록 추가"
-        if (isEdit) loadRecord(editingNo)
+
+        if (savedInstanceState != null) {
+            restoreState(savedInstanceState)
+        } else if (isEdit) {
+            loadRecord(editingNo)
+        }
         updateLocationStatus()
 
         etDate.setOnClickListener { showDatePicker() }
         btnPickPhoto.setOnClickListener { showPhotoSourceDialog() }
         btnPickLocation.setOnClickListener { openMapPicker() }
         btnSave.setOnClickListener { save() }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        photoUri?.let { outState.putString(KEY_PHOTO, it) }
+        originalPhotoUri?.let { outState.putString(KEY_ORIGINAL, it) }
+        latitude?.let { outState.putDouble(KEY_LAT, it) }
+        longitude?.let { outState.putDouble(KEY_LNG, it) }
+        cameraImageFile?.let { outState.putString(KEY_CAMERA_FILE, it.absolutePath) }
+    }
+
+    private fun restoreState(state: Bundle) {
+        photoUri = state.getString(KEY_PHOTO)
+        originalPhotoUri = state.getString(KEY_ORIGINAL)
+        if (state.containsKey(KEY_LAT)) latitude = state.getDouble(KEY_LAT)
+        if (state.containsKey(KEY_LNG)) longitude = state.getDouble(KEY_LNG)
+        state.getString(KEY_CAMERA_FILE)?.let { cameraImageFile = File(it) }
+
+        photoUri?.let { uriString ->
+            try {
+                imgPreview.scaleType = ImageView.ScaleType.CENTER_CROP
+                imgPreview.setImageURI(Uri.parse(uriString))
+            } catch (_: Exception) { /* placeholder 유지 */ }
+        }
     }
 
     private fun bindViews() {
@@ -188,7 +221,6 @@ class AddEditActivity : AppCompatActivity() {
         }
     }
 
-    /** API 33+ 는 READ_MEDIA_IMAGES, 그 이하는 READ_EXTERNAL_STORAGE */
     private fun readImagePermission(): String =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             Manifest.permission.READ_MEDIA_IMAGES
@@ -197,15 +229,12 @@ class AddEditActivity : AppCompatActivity() {
 
     private fun checkGalleryPermissionAndLaunch() {
         val perms = mutableListOf(readImagePermission())
-        // Android 10(Q)+ 에서 사진 원본 GPS를 읽으려면 ACCESS_MEDIA_LOCATION 필요
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             perms += Manifest.permission.ACCESS_MEDIA_LOCATION
         }
-        // 이미 모두 허용돼 있으면 시스템이 즉시 콜백(다이얼로그 없음)
         galleryPermissionLauncher.launch(perms.toTypedArray())
     }
 
-    /** ACTION_PICK → content://media/... URI 반환 (setRequireOriginal 사용 가능) */
     private fun launchGallery() {
         val intent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
         galleryLauncher.launch(intent)
@@ -241,9 +270,18 @@ class AddEditActivity : AppCompatActivity() {
         }
     }
 
+    /** 사진을 새로 고를 때 호출. 직전에 골랐던(저장 안 된) 내부 파일은 정리하고 새 사진을 표시. */
+    private fun replacePhoto(newUriString: String) {
+        val current = photoUri
+        // 현재 사진이 '저장된 원본'이 아니라 '직전에 고른 임시 파일'이면 정리
+        if (current != null && current != originalPhotoUri) {
+            ImageUtils.deleteInternalPhoto(this, current)
+        }
+        setPhoto(newUriString)
+    }
+
     private fun setPhoto(uriString: String) {
         photoUri = uriString
-        // 지금은 메인 스레드 단순 로딩. Day 11에서 코루틴 + ProgressBar로 교체합니다.
         try {
             imgPreview.scaleType = ImageView.ScaleType.CENTER_CROP
             imgPreview.setImageURI(Uri.parse(uriString))
@@ -266,6 +304,7 @@ class AddEditActivity : AppCompatActivity() {
         etDate.setText(record.visitDate)
         etMemo.setText(record.memo)
         photoUri = record.photoUri
+        originalPhotoUri = record.photoUri   // 저장돼 있던 사진 기억
         latitude = record.latitude
         longitude = record.longitude
         if (!record.photoUri.isNullOrBlank()) {
@@ -301,6 +340,8 @@ class AddEditActivity : AppCompatActivity() {
     // ───────── 저장 ─────────
 
     private fun save() {
+        if (isSaving) return   // 연타 방지
+
         val place = etPlace.text.toString().trim()
         val date = etDate.text.toString().trim()
         val memo = etMemo.text.toString().trim()
@@ -314,6 +355,10 @@ class AddEditActivity : AppCompatActivity() {
             toast("방문 날짜를 선택하세요")
             return
         }
+
+        // 검증 통과 후 잠금
+        isSaving = true
+        btnSave.isEnabled = false
 
         val record = TravelRecord(
             no = editingNo,
@@ -332,10 +377,27 @@ class AddEditActivity : AppCompatActivity() {
         }
 
         if (success) {
+            savedSuccessfully = true
+            // 수정에서 사진을 교체했다면 옛 사진 파일 정리
+            if (editingNo > 0 && originalPhotoUri != null && originalPhotoUri != photoUri) {
+                ImageUtils.deleteInternalPhoto(this, originalPhotoUri)
+            }
             toast(if (editingNo > 0) "수정되었습니다" else "저장되었습니다")
             finish()
         } else {
             toast("저장에 실패했습니다")
+            isSaving = false
+            btnSave.isEnabled = true   // 실패 시 재시도 허용
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // 저장하지 않고 화면을 떠난 경우(회전 등 재생성은 제외): 새로 복사된 미저장 사진 정리
+        if (isFinishing && !savedSuccessfully) {
+            if (photoUri != null && photoUri != originalPhotoUri) {
+                ImageUtils.deleteInternalPhoto(this, photoUri)
+            }
         }
     }
 
@@ -343,5 +405,11 @@ class AddEditActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_NO = "extra_no"
+
+        private const val KEY_PHOTO = "state_photo_uri"
+        private const val KEY_ORIGINAL = "state_original_photo_uri"
+        private const val KEY_LAT = "state_lat"
+        private const val KEY_LNG = "state_lng"
+        private const val KEY_CAMERA_FILE = "state_camera_file"
     }
 }

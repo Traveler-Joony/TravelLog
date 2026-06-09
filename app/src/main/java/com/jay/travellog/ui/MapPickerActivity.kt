@@ -3,8 +3,10 @@ package com.jay.travellog.ui
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Button
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.jay.travellog.R
+import com.jay.travellog.util.GeoUtils
 import com.naver.maps.geometry.LatLng
 import com.naver.maps.map.CameraPosition
 import com.naver.maps.map.MapView
@@ -25,7 +27,11 @@ class MapPickerActivity : AppCompatActivity(), OnMapReadyCallback {
         mapView.getMapAsync(this)
 
         findViewById<Button>(R.id.btnConfirm).setOnClickListener {
-            val target = naverMap?.cameraPosition?.target ?: return@setOnClickListener
+            val target = naverMap?.cameraPosition?.target
+            if (target == null || !GeoUtils.isValidLatLng(target.latitude, target.longitude)) {
+                Toast.makeText(this, "위치를 가져올 수 없습니다", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
             val data = Intent().apply {
                 putExtra(EXTRA_LAT, target.latitude)
                 putExtra(EXTRA_LNG, target.longitude)
@@ -37,14 +43,12 @@ class MapPickerActivity : AppCompatActivity(), OnMapReadyCallback {
 
     override fun onMapReady(map: NaverMap) {
         naverMap = map
-        // 전달받은 좌표가 있으면 그 위치에서 시작, 없으면 서울
         val lat = intent.getDoubleExtra(EXTRA_LAT, Double.NaN)
         val lng = intent.getDoubleExtra(EXTRA_LNG, Double.NaN)
-        val start = if (!lat.isNaN() && !lng.isNaN()) LatLng(lat, lng) else LatLng(37.5666, 126.9784)
+        val start = if (GeoUtils.isValidLatLng(lat, lng)) LatLng(lat, lng) else LatLng(37.5666, 126.9784)
         map.cameraPosition = CameraPosition(start, 15.0)
     }
 
-    // ───────── MapView 생명주기 전달 ─────────
     override fun onStart() { super.onStart(); mapView.onStart() }
     override fun onResume() { super.onResume(); mapView.onResume() }
     override fun onPause() { mapView.onPause(); super.onPause() }

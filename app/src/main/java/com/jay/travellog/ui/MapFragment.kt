@@ -1,5 +1,6 @@
 package com.jay.travellog.ui
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -7,6 +8,7 @@ import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import com.jay.travellog.R
 import com.jay.travellog.data.DBHelper
+import com.jay.travellog.util.GeoUtils
 import com.naver.maps.geometry.LatLng
 import com.naver.maps.geometry.LatLngBounds
 import com.naver.maps.map.CameraPosition
@@ -23,6 +25,9 @@ class MapFragment : Fragment(), OnMapReadyCallback {
     private var naverMap: NaverMap? = null
     private val infoWindow = InfoWindow()
 
+    // 현재 정보 창이 가리키는 기록 번호 (정보 창 탭 시 상세로 이동)
+    private var selectedNo: Int = -1
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -37,15 +42,28 @@ class MapFragment : Fragment(), OnMapReadyCallback {
 
     override fun onMapReady(map: NaverMap) {
         naverMap = map
+
+        // 정보 창을 누르면 해당 기록의 상세 화면으로 이동
+        infoWindow.setOnClickListener {
+            if (selectedNo > 0) {
+                val intent = Intent(requireContext(), DetailActivity::class.java)
+                intent.putExtra(DetailActivity.EXTRA_NO, selectedNo)
+                startActivity(intent)
+            }
+            true
+        }
+
         showMarkers(map)
     }
 
     private fun showMarkers(map: NaverMap) {
-        val records = DBHelper(requireContext()).getAllRecords()
-        val located = records.filter { it.latitude != null && it.longitude != null }
+        // getAllRecords는 실패 시 빈 리스트 반환(크래시 없음). 좌표는 유효성까지 검사.
+        val located = DBHelper(requireContext()).getAllRecords().filter {
+            it.latitude != null && it.longitude != null &&
+                GeoUtils.isValidLatLng(it.latitude!!, it.longitude!!)
+        }
 
         if (located.isEmpty()) {
-            // 좌표 있는 기록이 없으면 기본 위치(서울)만 표시
             map.cameraPosition = CameraPosition(LatLng(37.5666, 126.9784), 11.0)
             return
         }
@@ -56,17 +74,17 @@ class MapFragment : Fragment(), OnMapReadyCallback {
             marker.captionText = record.place
             marker.map = map
             marker.setOnClickListener {
-                // 마커 탭 → 정보 창에 여행지명 + 날짜 표시
+                // 마커 탭 → 정보 창에 여행지명 + 날짜 + 안내문, 대상 기록 기억
+                selectedNo = record.no
                 infoWindow.adapter = object : InfoWindow.DefaultTextAdapter(requireContext()) {
                     override fun getText(iw: InfoWindow): CharSequence =
-                        "${record.place}\n${record.visitDate}"
+                        "${record.place}\n${record.visitDate}\n(탭하여 상세 보기)"
                 }
                 infoWindow.open(marker)
                 true
             }
         }
 
-        // 카메라를 마커들이 모두 보이도록 이동
         if (located.size == 1) {
             val only = LatLng(located[0].latitude!!, located[0].longitude!!)
             map.moveCamera(CameraUpdate.scrollTo(only))

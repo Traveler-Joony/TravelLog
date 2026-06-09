@@ -7,6 +7,8 @@ data class TravelRecord(
     val visitDate: String,        // "2026-06-01" 형식
     val memo: String = "",
     val photoUri: String? = null, // 사진 URI (없을 수 있음)
-    val latitude: Double? = null, // 위도 (가산점, NULL 허용)
-    val longitude: Double? = null // 경도 (가산점, NULL 허용)
+    val latitude: Double? = null, // 위도 (NULL 허용)
+    val longitude: Double? = null,// 경도 (NULL 허용)
+    val createdAt: Long = 0L,     // 생성 시각 (epoch millis, DB가 자동 기록)
+    val updatedAt: Long = 0L      // 수정 시각 (epoch millis, DB가 자동 기록)
 )
